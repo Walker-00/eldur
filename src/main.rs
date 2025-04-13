@@ -1,4 +1,4 @@
-use std::ops::{Add, Deref};
+use std::ops::{Add, Deref, Mul};
 
 use ndarray::{ArrayD, IxDyn};
 use num_traits::{One, Zero};
@@ -59,6 +59,19 @@ where
     fn add(self, rhs: Self) -> Self::Output {
         Self {
             data: self.data + rhs.data,
+        }
+    }
+}
+
+impl<T> Mul for Tensor<T>
+where
+    T: Clone + Zero + One,
+{
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self {
+            data: self.data * rhs.data,
         }
     }
 }
