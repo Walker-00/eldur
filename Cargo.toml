@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 ndarray = { version = "0.16.1", features = ["rayon", "serde"] }
+num-traits = "0.2.19"
 polars = { version = "0.46.0", features = ["ndarray"] }
