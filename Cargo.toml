@@ -7,3 +7,4 @@ edition = "2024"
 ndarray = { version = "0.16.1", features = ["rayon", "serde"] }
 num-traits = "0.2.19"
 polars = { version = "0.46.0", features = ["ndarray"] }
+rand = "0.9.0"
