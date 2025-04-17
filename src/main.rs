@@ -78,7 +78,8 @@
 
 use std::ops::Deref;
 
-use ndarray::ArrayD;
+use ndarray::{Array, ArrayD};
+use rand::Rng;
 
 #[derive(Debug, Clone)]
 struct Tensor<T> {
@@ -88,6 +89,16 @@ struct Tensor<T> {
 impl<T> Tensor<T> {
     fn data(data: ArrayD<T>) -> Self {
         Self { data }
+    }
+
+    fn random() -> Self {
+        let mut rng = rand::rng();
+
+        let num_dims = rng.random_range(1..=4);
+
+        let shape: Vec<usize> = (0..num_dims).map(|_| rng.random_range(1..=10)).collect();
+
+        let data = ArrayD::
     }
 }
 
