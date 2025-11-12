@@ -1,115 +1,156 @@
-// use std::ops::{Add, Deref, Mul};
-//
-// use ndarray::{ArrayD, IxDyn};
-// use num_traits::{One, Zero};
-//
-// pub struct Tensor<T> {
-//     pub data: ArrayD<T>,
-// }
-//
-// impl<T> Deref for Tensor<T> {
-//     type Target = ArrayD<T>;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.data
-//     }
-// }
-//
-// impl<T> Tensor<T>
-// where
-//     T: Clone + Zero + One,
-// {
-//     pub fn from_array(data: ArrayD<T>) -> Self {
-//         Self { data }
-//     }
-//
-//     pub fn zeros(shape: &[usize]) -> Self {
-//         Self {
-//             data: ArrayD::zeros(IxDyn(shape)),
-//         }
-//     }
-//
-//     pub fn ones(shape: &[usize]) -> Self {
-//         Self {
-//             data: ArrayD::ones(IxDyn(shape)),
-//         }
-//     }
-//
-//     pub fn shape(&self) -> &[usize] {
-//         self.data.shape()
-//     }
-//
-//     pub fn get(&self, index: &[usize]) -> Option<&T> {
-//         self.data.get(index)
-//     }
-//
-//     pub fn set(&mut self, index: &[usize], value: T) {
-//         if let Some(elem) = self.data.get_mut(index) {
-//             *elem = value;
-//         }
-//     }
-// }
-//
-// impl<T> Add for Tensor<T>
-// where
-//     T: Clone + Zero + One,
-// {
-//     type Output = Self;
-//
-//     fn add(self, rhs: Self) -> Self::Output {
-//         Self {
-//             data: self.data + rhs.data,
-//         }
-//     }
-// }
-//
-// impl<T> Mul for Tensor<T>
-// where
-//     T: Clone + Zero + One,
-// {
-//     type Output = Self;
-//
-//     fn mul(self, rhs: Self) -> Self::Output {
-//         Self {
-//             data: self.data * rhs.data,
-//         }
-//     }
-// }
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use thiserror::Error;
 
-use std::ops::Deref;
-
-use ndarray::{Array, ArrayD};
-use rand::Rng;
-
-#[derive(Debug, Clone)]
-struct Tensor<T> {
-    data: ArrayD<T>,
+struct Tensor {
+    data: Vec<f32>,
+    shape: Vec<usize>,
+    strides: Vec<usize>,
 }
 
-impl<T> Tensor<T> {
-    fn data(data: ArrayD<T>) -> Self {
-        Self { data }
+#[derive(Error, Debug)]
+enum TensorError {
+    #[error("Incompatible Error: {0}")]
+    IncompatibleShape(&'static str),
+}
+
+impl Tensor {
+    pub fn new(shape: &[usize]) -> Self {
+        let size = shape.iter().product();
+        let strides = Tensor::compute_strides(shape);
+        Tensor {
+            data: vec![0.0; size],
+            shape: shape.to_vec(),
+            strides,
+        }
     }
 
-    fn random() -> Self {
-        let mut rng = rand::rng();
+    // Create a tensor filled with zeros
+    pub fn zeros(shape: &[usize]) -> Self {
+        Self::new(shape) // new() already creates zeros
+    }
 
-        let num_dims = rng.random_range(1..=4);
+    // Create a tensor filled with ones
+    pub fn ones(shape: &[usize]) -> Self {
+        let size = shape.iter().product();
+        let strides = Tensor::compute_strides(shape);
+        Tensor {
+            data: vec![1.0; size], // Fill with 1.0 instead of 0.0
+            shape: shape.to_vec(),
+            strides,
+        }
+    }
 
-        let shape: Vec<usize> = (0..num_dims).map(|_| rng.random_range(1..=10)).collect();
+    // Create a tensor with specific value (like torch.full)
+    pub fn full(shape: &[usize], value: f32) -> Self {
+        let size = shape.iter().product();
+        let strides = Tensor::compute_strides(shape);
+        Tensor {
+            data: vec![value; size],
+            shape: shape.to_vec(),
+            strides,
+        }
+    }
 
-        let data = ArrayD::
+    // Create scalar tensor (0D) with value
+    pub fn scalar(value: f32) -> Self {
+        Tensor {
+            data: vec![value],
+            shape: vec![], // Empty shape for scalar (0D tensor)
+            strides: vec![],
+        }
+    }
+
+    fn compute_strides(shape: &[usize]) -> Vec<usize> {
+        let mut strides = vec![1; shape.len()];
+        for i in (0..shape.len() - 1).rev() {
+            strides[i] = strides[i + 1] * shape[i + 1];
+        }
+        strides
+    }
+
+    fn item(&self) -> Result<&f32, TensorError> {
+        if self.data.len() == 1 {
+            Ok(&self.data[0])
+        } else {
+            Err(TensorError::IncompatibleShape(
+                "item() can only be called on tensors with exactly one element",
+            ))
+        }
+    }
+
+    fn item_owned(&self) -> Result<f32, TensorError> {
+        if self.data.len() == 1 {
+            Ok(self.data[0])
+        } else {
+            Err(TensorError::IncompatibleShape(
+                "item() can only be called on tensors with exactly one element",
+            ))
+        }
     }
 }
 
-impl<T> Deref for Tensor<T> {
-    type Target = ArrayD<T>;
+impl Tensor {
+    // Create identity matrix (like torch.eye)
+    pub fn eye(n: usize) -> Self {
+        let mut data = vec![0.0; n * n];
+        for i in 0..n {
+            data[i * n + i] = 1.0;
+        }
+        Tensor {
+            data,
+            shape: vec![n, n],
+            strides: Tensor::compute_strides(&[n, n]),
+        }
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.data
+    // Create tensor with values from range (like torch.arange)
+    pub fn arange(start: f32, end: f32, step: f32) -> Self {
+        let mut data = Vec::new();
+        let mut current = start;
+        while current < end {
+            data.push(current);
+            current += step;
+        }
+        let shape = vec![data.len()];
+        Tensor {
+            data,
+            shape: shape.clone(),
+            strides: Tensor::compute_strides(&shape),
+        }
+    }
+
+    // Create tensor with linear spacing (like torch.linspace)
+    pub fn linspace(start: f32, end: f32, steps: usize) -> Self {
+        let step_size = (end - start) / (steps - 1) as f32;
+        let data: Vec<f32> = (0..steps).map(|i| start + i as f32 * step_size).collect();
+        let shape = vec![steps];
+        Tensor {
+            data,
+            shape: shape.clone(),
+            strides: Tensor::compute_strides(&shape),
+        }
     }
 }
 
 fn main() {
-    println!("Hello, world!");
+    // Like torch.zeros([2, 3])
+    let zeros = Tensor::zeros(&[2, 3]);
+
+    // Like torch.ones([4, 5])
+    let ones = Tensor::ones(&[4, 5]);
+
+    // Like torch.full([3, 3], 7.0)
+    let full = Tensor::full(&[3, 3], 7.0);
+
+    // Like torch.tensor(5.0)
+    let scalar = Tensor::scalar(5.0);
+
+    // Like torch.eye(3)
+    let identity = Tensor::eye(3);
+
+    // Like torch.arange(0, 10, 2)
+    let range = Tensor::arange(0.0, 10.0, 2.0);
+
+    // Like torch.linspace(0, 1, 5)
+    let linear = Tensor::linspace(0.0, 1.0, 5);
 }
