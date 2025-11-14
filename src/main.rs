@@ -1,3 +1,6 @@
+use std::iter;
+
+use pulp::{Arch, WithSimd};
 use rayon::prelude::*;
 use simdeez::prelude::*;
 
@@ -59,10 +62,43 @@ impl Tensor {
     }
 
     pub fn add(&self, other: &Tensor) -> Tensor {
-        simd_runtime_generate!(
-            assert_eq!(self.data.len(), other.data.len());
-        );
-        todo!()
+        assert_eq!(self.data.len(), other.data.len());
+        let mut result = vec![0.0f32; self.data.len()];
+
+        struct Impl<'a> {
+            out: &'a mut [f32],
+            a: &'a Tensor,
+            b: &'a Tensor,
+        }
+
+        impl WithSimd for Impl<'_> {
+            type Output = ();
+
+            #[inline(always)]
+            fn with_simd<S: pulp::Simd>(self, simd: S) -> Self::Output {
+                let Self { out, a, b } = self;
+
+                let (out0, out1) = S::as_mut_simd_f32s(out);
+                let (a0, a1) = S::as_simd_f32s(a.data.as_slice());
+                let (b0, b1) = S::as_simd_f32s(&b.data);
+
+                for (out, (a, b)) in iter::zip(out0, iter::zip(a0, b0)) {
+                    *out = simd.add_f32s(*a, *b);
+                }
+
+                for (out, (a, b)) in iter::zip(out1, iter::zip(a1, b1)) {
+                    *out = *a + *b;
+                }
+            }
+        }
+
+        Arch::new().dispatch(Impl {
+            out: &mut result,
+            a: self,
+            b: other,
+        });
+
+        Tensor::from_vec(result, &self.shape)
     }
 }
 
