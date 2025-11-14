@@ -100,6 +100,43 @@ impl Tensor {
 
         Tensor::from_vec(result, &self.shape)
     }
+
+    pub fn sum(&self) -> f32 {
+        struct Impl<'a> {
+            input: &'a [f32],
+        }
+
+        impl WithSimd for Impl<'_> {
+            type Output = f32;
+
+            #[inline(always)]
+            fn with_simd<S: pulp::Simd>(self, simd: S) -> Self::Output {
+                let Self { input } = self;
+
+                let (input0, input1) = S::as_simd_f32s(input);
+                let (input04, input01) = pulp::as_arrays::<4, _>(input0);
+
+                let mut sum0 = simd.splat_f32s(0.0);
+                let mut sum1 = simd.splat_f32s(0.0);
+                let mut sum2 = simd.splat_f32s(0.0);
+                let mut sum3 = simd.splat_f32s(0.0);
+
+                for [input0, input1, input2, input3] in input04 {
+                    sum0 = simd.add_f32s(sum0, *input0);
+                    sum1 = simd.add_f32s(sum1, *input1);
+                    sum2 = simd.add_f32s(sum2, *input2);
+                    sum3 = simd.add_f32s(sum3, *input3);
+                }
+
+                sum0 = simd.add_f32s(sum0, sum1);
+                sum2 = simd.add_f32s(sum2, sum3);
+
+                sum0 = simd.add_f32s(sum0, sum2);
+                todo!()
+            }
+        }
+        todo!()
+    }
 }
 
 fn main() {}
