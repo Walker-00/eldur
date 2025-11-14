@@ -67,8 +67,8 @@ impl Tensor {
 
         struct Impl<'a> {
             out: &'a mut [f32],
-            a: &'a Tensor,
-            b: &'a Tensor,
+            a: &'a [f32],
+            b: &'a [f32],
         }
 
         impl WithSimd for Impl<'_> {
@@ -79,8 +79,8 @@ impl Tensor {
                 let Self { out, a, b } = self;
 
                 let (out0, out1) = S::as_mut_simd_f32s(out);
-                let (a0, a1) = S::as_simd_f32s(a.data.as_slice());
-                let (b0, b1) = S::as_simd_f32s(&b.data);
+                let (a0, a1) = S::as_simd_f32s(a);
+                let (b0, b1) = S::as_simd_f32s(b);
 
                 for (out, (a, b)) in iter::zip(out0, iter::zip(a0, b0)) {
                     *out = simd.add_f32s(*a, *b);
@@ -94,8 +94,8 @@ impl Tensor {
 
         Arch::new().dispatch(Impl {
             out: &mut result,
-            a: self,
-            b: other,
+            a: &self.data,
+            b: &other.data,
         });
 
         Tensor::from_vec(result, &self.shape)
