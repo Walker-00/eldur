@@ -17,15 +17,17 @@
 # simdeez = "2.0.0"
 # thiserror = "2.0.16"
 
-[lib]
+[package]
 name = "eldur"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+name = "eldur"
 path = "src/lib.rs"
 
 [dependencies]
 aligned-vec = "0.6.4"
-criterion = "0.7.0"
 faer = "0.22.6"
 ndarray = { version = "0.16.1", features = ["rayon", "serde"] }
 ndarray-rand = "0.15.0"
@@ -36,3 +38,10 @@ rand = "0.9.0"
 rayon = "1.11.0"
 simdeez = "2.0.0"
 thiserror = "2.0.16"
+
+[[bench]]
+name = "tensor_bench"
+harness = false
+
+[dev-dependencies]
+divan = "0.1.21"

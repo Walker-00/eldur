@@ -10,13 +10,9 @@
  *      Add the offset options for better Compatibility with others frameworks
 */
 
-use criterion::{Criterion, criterion_group, criterion_main};
-use ndarray::Array2;
 use std::{
-    cell::RefCell,
     fmt::{self, Debug},
     iter,
-    rc::Rc,
 };
 
 use aligned_vec::{AVec, ConstAlign, avec};
@@ -26,7 +22,7 @@ use rayon::prelude::*;
 
 #[derive(Clone)]
 pub struct Tensor {
-    pub data: Rc<RefCell<AVec<f32, ConstAlign<32>>>>,
+    pub data: AVec<f32, ConstAlign<32>>,
     // pub data: AVec<f32, RuntimeAlign>,
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
@@ -40,7 +36,7 @@ impl Tensor {
         Self {
             // data: vec![0.0; size],
             // data: aligned_vec::avec_rt![[32]| 0.0; size],
-            data: Rc::new(RefCell::new(avec![[32]| 0.0; size])),
+            data: avec![[32]| 0.0; size],
             shape: shape.to_vec(),
             strides,
             offset: 0,
@@ -50,7 +46,7 @@ impl Tensor {
     pub fn from_vec(data: Vec<f32>, shape: &[usize]) -> Self {
         assert_eq!(data.len(), shape.par_iter().product::<usize>());
         let strides = Self::compute_strides(shape);
-        let data = Rc::new(RefCell::new(AVec::from_iter(32, data)));
+        let data = AVec::from_iter(32, data);
 
         Self {
             data,
@@ -80,17 +76,17 @@ impl Tensor {
     }
 
     pub fn get(&self, idx: &[usize]) -> f32 {
-        self.data.borrow()[self.index(idx)]
+        self.data[self.index(idx)]
     }
 
     pub fn set(&mut self, idx: &[usize], value: f32) {
         let i = self.index(idx);
-        self.data.borrow_mut()[i] = value;
+        self.data[i] = value;
     }
 
     pub fn add(&self, other: &Tensor) -> Tensor {
-        assert_eq!(self.data.borrow().len(), other.data.borrow().len());
-        let mut result = vec![0.0f32; self.data.borrow().len()];
+        assert_eq!(self.data.len(), other.data.len());
+        let mut result = vec![0.0f32; self.data.len()];
 
         struct Impl<'a> {
             out: &'a mut [f32],
@@ -121,8 +117,8 @@ impl Tensor {
 
         Arch::new().dispatch(Impl {
             out: &mut result,
-            a: &self.data.borrow(),
-            b: &other.data.borrow(),
+            a: &self.data,
+            b: &other.data,
         });
 
         Tensor::from_vec(result, &self.shape)
@@ -173,13 +169,11 @@ impl Tensor {
                 sum
             }
         }
-        Arch::new().dispatch(Impl {
-            input: &self.data.borrow(),
-        })
+        Arch::new().dispatch(Impl { input: &self.data })
     }
 
     pub fn mean(&self) -> f32 {
-        self.sum() / self.data.borrow().len() as f32
+        self.sum() / self.data.len() as f32
     }
 
     pub fn swapaxes(&self, axis1: usize, axis2: usize) -> Tensor {
@@ -223,14 +217,14 @@ impl Tensor {
     }
 
     pub fn par_add(&self, other: &Tensor) -> Tensor {
-        assert_eq!(self.data.borrow().len(), other.data.borrow().len());
-        let len = self.data.borrow().len();
+        assert_eq!(self.data.len(), other.data.len());
+        let len = self.data.len();
         let mut result = vec![0.0f32; len];
 
         result
             .par_chunks_mut(1024)
-            .zip(self.data.borrow().par_chunks(1024))
-            .zip(other.data.borrow().par_chunks(1024))
+            .zip(self.data.par_chunks(1024))
+            .zip(other.data.par_chunks(1024))
             .for_each(|((out, a), b)| {
                 struct Impl<'a> {
                     out: &'a mut [f32],
@@ -268,7 +262,6 @@ impl Tensor {
     /// Parallel sum using SIMD + Rayon
     pub fn par_sum(&self) -> f32 {
         self.data
-            .borrow()
             .par_chunks(1024)
             .map(|chunk| {
                 struct Impl<'a> {
@@ -327,73 +320,7 @@ impl Debug for Tensor {
             .field("shape", &self.shape)
             .field("strides", &self.strides)
             .field("offset", &self.offset)
-            .field("data_len", &self.data.borrow().len())
+            .field("data_len", &self.data.len())
             .finish()
     }
 }
-
-fn bench_tensor_add(c: &mut Criterion) {
-    let shape = [1000, 1000];
-    let a = Tensor::zeros(&shape);
-    let b = Tensor::zeros(&shape);
-
-    c.bench_function("Tensor add 1000x1000", |bencher| {
-        bencher.iter(|| {
-            let _ = a.add(&b);
-        });
-    });
-
-    c.bench_function("Tensor par_add 1000x1000", |bencher| {
-        bencher.iter(|| {
-            let _ = a.par_add(&b);
-        });
-    });
-}
-
-fn bench_tensor_sum(c: &mut Criterion) {
-    let shape = [1000, 1000];
-    let a = Tensor::zeros(&shape);
-
-    c.bench_function("Tensor sum 1000x1000", |bencher| {
-        bencher.iter(|| {
-            let _ = a.sum();
-        });
-    });
-
-    c.bench_function("Tensor par_sum 1000x1000", |bencher| {
-        bencher.iter(|| {
-            let _ = a.par_sum();
-        });
-    });
-}
-
-fn bench_ndarray_add(c: &mut Criterion) {
-    let a = Array2::<f32>::zeros((1000, 1000));
-    let b = Array2::<f32>::zeros((1000, 1000));
-
-    c.bench_function("ndarray add 1000x1000", |bencher| {
-        bencher.iter(|| {
-            let _ = &a + &b;
-        });
-    });
-}
-
-fn bench_ndarray_sum(c: &mut Criterion) {
-    let a = Array2::<f32>::zeros((1000, 1000));
-
-    c.bench_function("ndarray sum 1000x1000", |bencher| {
-        bencher.iter(|| {
-            let _ = a.sum();
-        });
-    });
-}
-
-criterion_group!(
-    benches,
-    bench_tensor_add,
-    bench_tensor_sum,
-    bench_ndarray_add,
-    bench_ndarray_sum
-);
-
-criterion_main!(benches);
