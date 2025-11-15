@@ -10,16 +10,16 @@
  *      Add the offset options for better Compatibility with others frameworks
 */
 
-use std::iter;
+use std::{cell::RefCell, iter, rc::Rc};
 
-use aligned_vec::{AVec, ConstAlign};
+use aligned_vec::{AVec, ConstAlign, avec};
 use pulp::{Arch, WithSimd};
 use rayon::prelude::*;
 // use simdeez::prelude::*;
 
 #[derive(Debug, Clone)]
 pub struct Tensor {
-    pub data: AVec<f32, ConstAlign<32>>,
+    pub data: Rc<RefCell<AVec<f32, ConstAlign<32>>>>,
     // pub data: AVec<f32, RuntimeAlign>,
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
@@ -33,7 +33,7 @@ impl Tensor {
         Self {
             // data: vec![0.0; size],
             // data: aligned_vec::avec_rt![[32]| 0.0; size],
-            data: aligned_vec::avec![[32]| 0.0; size],
+            data: Rc::new(RefCell::new(avec![[32]| 0.0; size])),
             shape: shape.to_vec(),
             strides,
         }
@@ -42,7 +42,7 @@ impl Tensor {
     pub fn from_vec(data: Vec<f32>, shape: &[usize]) -> Self {
         assert_eq!(data.len(), shape.par_iter().product());
         let strides = Self::compute_strides(shape);
-        let data = AVec::from_iter(32, data);
+        let data = Rc::new(RefCell::new(AVec::from_iter(32, data)));
 
         Self {
             data,
@@ -71,17 +71,17 @@ impl Tensor {
     }
 
     pub fn get(&self, idx: &[usize]) -> f32 {
-        self.data[self.index(idx)]
+        self.data.borrow()[self.index(idx)]
     }
 
     pub fn set(&mut self, idx: &[usize], value: f32) {
         let i = self.index(idx);
-        self.data[i] = value;
+        self.data.borrow_mut()[i] = value;
     }
 
     pub fn add(&self, other: &Tensor) -> Tensor {
-        assert_eq!(self.data.len(), other.data.len());
-        let mut result = vec![0.0f32; self.data.len()];
+        assert_eq!(self.data.borrow().len(), other.data.borrow().len());
+        let mut result = vec![0.0f32; self.data.borrow().len()];
 
         struct Impl<'a> {
             out: &'a mut [f32],
@@ -112,8 +112,8 @@ impl Tensor {
 
         Arch::new().dispatch(Impl {
             out: &mut result,
-            a: &self.data,
-            b: &other.data,
+            a: &self.data.borrow(),
+            b: &other.data.borrow(),
         });
 
         Tensor::from_vec(result, &self.shape)
@@ -164,11 +164,13 @@ impl Tensor {
                 sum
             }
         }
-        Arch::new().dispatch(Impl { input: &self.data })
+        Arch::new().dispatch(Impl {
+            input: &self.data.borrow(),
+        })
     }
 
     pub fn mean(&self) -> f32 {
-        self.sum() / self.data.len() as f32
+        self.sum() / self.data.borrow().len() as f32
     }
 
     pub fn swapaxes(&self, axis1: usize, axis2: usize) -> Tensor {
@@ -177,9 +179,21 @@ impl Tensor {
             "Axis index out of bounds."
         );
 
-        // let mut new_shape = self.shape
+        let mut new_shape = self.shape.clone();
+        let mut new_strides = self.strides.clone();
 
-        todo!()
+        new_shape.swap(axis1, axis2);
+        new_strides.swap(axis1, axis2);
+
+        Tensor {
+            data: self.data.clone(),
+            shape: new_shape,
+            strides: new_strides,
+        }
+    }
+
+    pub fn narrow(&self, axis: usize, start: usize, end: usize) -> Tensor {
+        assert!(axis < self.shape.len(), "Narrow axis index out of bounds.");
     }
 }
 
