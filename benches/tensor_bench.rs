@@ -1,65 +1,60 @@
-/*
- * Later Todo List To Improve
- *
- * For The Performance: CGT_6917e073-f874-8003-89e6-a12a3f041e17
- * Make The very performance Aligned Vector Storage Backend for Tensor with Arc + Copy-On-Write(COW)
- * Add the Cached values to the tensor like computing the dims and len
- * Make The Optionales Methods with par_<methods_name> for Utilizing the Parallel Computing
- *
- * For The Compatibility: GMN_4e8f478ba9002916
- * Add the offset options for better Compatibility with others frameworks
- */
-
 use eldur::Tensor;
 use faer::Mat;
 use ndarray::{Array2, Axis};
 use rayon::prelude::*; // Required for ndarray parallel sum
 
 // ---
-// 1. SET A LARGE SIZE
-// A 2x2 array (4 elements) is too small. Overhead will dominate.
-// Let's use 1024x1024 (1,048,576 elements) to actually test SIMD and Rayon.
+// 1. SET MULTIPLE SIZES
+// We define a list of side-lengths (N).
+// The benchmark will run on N x N arrays.
+// This will test:
+// - 2x2 (4 elements) - Your original "slow" case
+// - 64x64 (4,096 elements) - Small
+// - 256x256 (65,536 elements) - Medium
+// - 1024x1024 (1,048,576 elements) - Large
 // ---
-const ROWS: usize = 1024;
-const COLS: usize = 1024;
-const TOTAL_ELEMENTS: usize = ROWS * COLS;
-
-const SHAPE: [usize; 2] = [ROWS, COLS];
-const NDARRAY_SHAPE: (usize, usize) = (ROWS, COLS);
+const SIDES: [usize; 4] = [2, 64, 256, 1024];
 
 // ---
-// 2. USE THE BENCHER CORRECTLY
-// We must separate setup (creating the tensors) from the code being benchmarked.
-// `bencher.bench_local(|| ...)` is the standard way to do this in divan.
-// We also use `std::hint::black_box` to prevent the compiler from
-// optimizing away the operation.
-//
-// We also use non-zero data (e.g., `vec![1.0f32; ...]`)
-// as benchmarking on `zeros` can sometimes be misleading.
+// 2. HELPER FUNCTION
+// Helper to create a shape [N, N] and total elements.
+// ---
+fn setup(n: usize) -> ([usize; 2], (usize, usize), usize) {
+    let shape = [n, n];
+    let ndarray_shape = (n, n);
+    let total_elements = n * n;
+    (shape, ndarray_shape, total_elements)
+}
+
+// ---
+// ADDITION BENCHMARKS
 // ---
 
-#[divan::bench(sample_size = 100, sample_count = 10)]
-fn bench_tensor_add(bencher: divan::Bencher) {
-    let a = Tensor::from_vec(vec![1.0f32; TOTAL_ELEMENTS], &SHAPE);
-    let b = Tensor::from_vec(vec![1.0f32; TOTAL_ELEMENTS], &SHAPE);
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+fn bench_tensor_add(bencher: divan::Bencher, n: usize) {
+    let (shape, _, total_elements) = setup(n);
+    let a = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
+    let b = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
     bencher.bench_local(|| {
         std::hint::black_box(a.add(&b));
     });
 }
 
-#[divan::bench(sample_size = 100, sample_count = 10)]
-fn bench_ndarray_add(bencher: divan::Bencher) {
-    let a = Array2::<f32>::from_elem(NDARRAY_SHAPE, 1.0);
-    let b = Array2::<f32>::from_elem(NDARRAY_SHAPE, 1.0);
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+fn bench_ndarray_add(bencher: divan::Bencher, n: usize) {
+    let (_, ndarray_shape, _) = setup(n);
+    let a = Array2::<f32>::from_elem(ndarray_shape, 1.0);
+    let b = Array2::<f32>::from_elem(ndarray_shape, 1.0);
     bencher.bench_local(|| {
         std::hint::black_box(&a + &b);
     });
 }
 
-#[divan::bench(sample_size = 100, sample_count = 10)]
-fn bench_faer_add(bencher: divan::Bencher) {
-    let a = Mat::<f32>::from_fn(ROWS, COLS, |_, _| 1.0);
-    let b = Mat::<f32>::from_fn(ROWS, COLS, |_, _| 1.0);
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+fn bench_faer_add(bencher: divan::Bencher, n: usize) {
+    let (rows, cols) = (n, n);
+    let a = Mat::<f32>::from_fn(rows, cols, |_, _| 1.0);
+    let b = Mat::<f32>::from_fn(rows, cols, |_, _| 1.0);
     bencher.bench_local(|| {
         std::hint::black_box(&a + &b);
     });
@@ -69,19 +64,20 @@ fn bench_faer_add(bencher: divan::Bencher) {
 // SINGLE-THREADED SUMMATION
 // ---
 
-#[divan::bench(sample_size = 100, sample_count = 10)]
-fn bench_tensor_sum(bencher: divan::Bencher) {
-    let a = Tensor::from_vec(vec![1.0f32; TOTAL_ELEMENTS], &SHAPE);
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+fn bench_tensor_sum(bencher: divan::Bencher, n: usize) {
+    let (shape, _, total_elements) = setup(n);
+    let a = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
     bencher.bench_local(|| {
         std::hint::black_box(a.sum());
     });
 }
 
-#[divan::bench(sample_size = 100, sample_count = 10)]
-fn bench_ndarray_sum(bencher: divan::Bencher) {
-    let a = Array2::<f32>::from_elem(NDARRAY_SHAPE, 1.0);
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+fn bench_ndarray_sum(bencher: divan::Bencher, n: usize) {
+    let (_, ndarray_shape, _) = setup(n);
+    let a = Array2::<f32>::from_elem(ndarray_shape, 1.0);
     bencher.bench_local(|| {
-        // .sum() on ndarray is single-threaded
         std::hint::black_box(a.sum());
     });
 }
@@ -90,28 +86,29 @@ fn bench_ndarray_sum(bencher: divan::Bencher) {
 // MULTI-THREADED (PARALLEL) SUMMATION
 // ---
 
-#[divan::bench(sample_size = 100, sample_count = 10)]
-fn bench_tensor_sum_parallel(bencher: divan::Bencher) {
-    let a = Tensor::from_vec(vec![1.0f32; TOTAL_ELEMENTS], &SHAPE);
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+fn bench_tensor_sum_parallel(bencher: divan::Bencher, n: usize) {
+    let (shape, _, total_elements) = setup(n);
+    let a = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
     bencher.bench_local(|| {
         std::hint::black_box(a.par_sum());
     });
 }
 
-#[divan::bench(sample_size = 100, sample_count = 10)]
-fn bench_ndarray_sum_parallel(bencher: divan::Bencher) {
-    let a = Array2::<f32>::from_elem(NDARRAY_SHAPE, 1.0);
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+fn bench_ndarray_sum_parallel(bencher: divan::Bencher, n: usize) {
+    let (_, ndarray_shape, _) = setup(n);
+    let a = Array2::<f32>::from_elem(ndarray_shape, 1.0);
     bencher.bench_local(|| {
-        // To get a parallel sum in ndarray, you must use rayon explicitly
         std::hint::black_box(a.par_iter().sum::<f32>());
     });
 }
 
-#[divan::bench(sample_size = 100, sample_count = 10)]
-fn bench_faer_sum_parallel(bencher: divan::Bencher) {
-    let a = Mat::<f32>::from_fn(ROWS, COLS, |_, _| 1.0);
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+fn bench_faer_sum_parallel(bencher: divan::Bencher, n: usize) {
+    let (rows, cols) = (n, n);
+    let a = Mat::<f32>::from_fn(rows, cols, |_, _| 1.0);
     bencher.bench_local(|| {
-        // faer's .sum() is parallel by default if compiled with the "rayon" feature
         std::hint::black_box(a.sum());
     });
 }
