@@ -12,18 +12,19 @@
 
 use std::{
     fmt::{self, Debug},
-    iter,
+    iter, slice,
 };
 
-use aligned_vec::{AVec, ConstAlign, avec};
+use aligned_vec::{AVec, ConstAlign, RuntimeAlign, avec, avec_rt};
 use pulp::{Arch, WithSimd};
 use rayon::prelude::*;
 // use simdeez::prelude::*;
 
 #[derive(Clone)]
 pub struct Tensor {
-    pub data: AVec<f32, ConstAlign<32>>,
-    // pub data: AVec<f32, RuntimeAlign>,
+    // pub data: AVec<f32, ConstAlign<32>>,
+    pub data: AVec<f32, RuntimeAlign>,
+    // pub data: Vec<f32>,
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
     pub offset: usize,
@@ -35,8 +36,8 @@ impl Tensor {
         let strides = Self::compute_strides(shape);
         Self {
             // data: vec![0.0; size],
-            // data: aligned_vec::avec_rt![[32]| 0.0; size],
-            data: avec![[32]| 0.0; size],
+            data: aligned_vec::avec_rt![[32]| 0.0; size],
+            // data: avec![[32]| 0.0; size],
             shape: shape.to_vec(),
             strides,
             offset: 0,
@@ -86,8 +87,19 @@ impl Tensor {
 
     pub fn add(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.data.len(), other.data.len());
-        let mut result = vec![0.0f32; self.data.len()];
+        let len = self.data.len();
 
+        // Allocate aligned AVec result directly
+        // let mut result: AVec<f32, ConstAlign<32>> = avec![[32]| 0.0; len];
+        let mut result: AVec<f32, RuntimeAlign> = avec_rt![[32]| 0.0; len];
+        // let mut result = vec![0.0; len];
+
+        // Get raw slices
+        let a = &self.data;
+        let b = &other.data;
+        let out = &mut result;
+
+        // Use the same WithSimd dispatch but iterate over slices, and use unsafe to avoid bounds checks
         struct Impl<'a> {
             out: &'a mut [f32],
             a: &'a [f32],
@@ -99,31 +111,122 @@ impl Tensor {
 
             #[inline(always)]
             fn with_simd<S: pulp::Simd>(self, simd: S) -> Self::Output {
-                let Self { out, a, b } = self;
+                let Impl { out, a, b } = self;
 
                 let (out0, out1) = S::as_mut_simd_f32s(out);
                 let (a0, a1) = S::as_simd_f32s(a);
                 let (b0, b1) = S::as_simd_f32s(b);
 
-                for (out, (a, b)) in iter::zip(out0, iter::zip(a0, b0)) {
-                    *out = simd.add_f32s(*a, *b);
+                for (out_simd, (a_simd, b_simd)) in iter::zip(out0, iter::zip(a0, b0)) {
+                    *out_simd = simd.add_f32s(*a_simd, *b_simd);
                 }
 
-                for (out, (a, b)) in iter::zip(out1, iter::zip(a1, b1)) {
-                    *out = *a + *b;
+                // Handle tail (scalar part)
+                for (out_s, (a_s, b_s)) in iter::zip(out1, iter::zip(a1, b1)) {
+                    *out_s = *a_s + *b_s;
                 }
             }
         }
 
+        // SAFETY: we know the slices are sized correctly, as we created result with same len
+        let out_slice: &mut [f32] = unsafe { slice::from_raw_parts_mut(out.as_mut_ptr(), len) };
+        let a_slice: &[f32] = unsafe { slice::from_raw_parts(a.as_ptr(), len) };
+        let b_slice: &[f32] = unsafe { slice::from_raw_parts(b.as_ptr(), len) };
+
         Arch::new().dispatch(Impl {
-            out: &mut result,
-            a: &self.data,
-            b: &other.data,
+            out: out_slice,
+            a: a_slice,
+            b: b_slice,
         });
 
-        Tensor::from_vec(result, &self.shape)
+        Tensor {
+            data: result,
+            shape: self.shape.clone(),
+            strides: self.strides.clone(),
+            offset: self.offset,
+        }
     }
 
+    // pub fn par_add(&self, other: &Tensor) -> Tensor {
+    //     assert_eq!(self.data.len(), other.data.len());
+    //     let len = self.data.len();
+    //
+    //     // Allocate aligned AVec result directly
+    //     let mut result: AVec<f32, ConstAlign<32>> = avec![[32]| 0.0; len];
+    //
+    //     // Tune chunk size: larger chunks reduce scheduling overhead for small workloads
+    //     let chunk = 16384usize.min(len.max(1024)); // heuristic
+    //
+    //     // Work on raw pointers to avoid bounds checks
+    //     let a_ptr = self.data.as_ptr();
+    //     let b_ptr = other.data.as_ptr();
+    //     let out_ptr = result.as_mut_ptr();
+    //
+    //     unsafe {
+    //         // rayon parallel loop operating on indexes
+    //         (0..len).into_par_iter().with_max_len(chunk).for_each(|i| {
+    //             // simple element-wise add — minimal overhead
+    //             // Using safe indexing here would reintroduce checks; use unsafe raw loads/stores
+    //             unsafe {
+    //                 let ai = *a_ptr.add(i);
+    //                 let bi = *b_ptr.add(i);
+    //                 *out_ptr.add(i) = ai + bi;
+    //             }
+    //         });
+    //     }
+    //
+    //     Tensor {
+    //         data: result,
+    //         shape: self.shape.clone(),
+    //         strides: self.strides.clone(),
+    //         offset: self.offset,
+    //     }
+    // }
+
+    // pub fn add(&self, other: &Tensor) -> Tensor {
+    //     assert_eq!(self.data.len(), other.data.len());
+    //     let mut result = vec![0.0f32; self.data.len()];
+    //
+    //     struct Impl<'a> {
+    //         out: &'a mut [f32],
+    //         a: &'a [f32],
+    //         b: &'a [f32],
+    //     }
+    //
+    //     impl WithSimd for Impl<'_> {
+    //         type Output = ();
+    //
+    //         #[inline(always)]
+    //         fn with_simd<S: pulp::Simd>(self, simd: S) -> Self::Output {
+    //             let Self { out, a, b } = self;
+    //
+    //             let (out0, out1) = S::as_mut_simd_f32s(out);
+    //             let (a0, a1) = S::as_simd_f32s(a);
+    //             let (b0, b1) = S::as_simd_f32s(b);
+    //
+    //             for (out, (a, b)) in iter::zip(out0, iter::zip(a0, b0)) {
+    //                 *out = simd.add_f32s(*a, *b);
+    //             }
+    //
+    //             for (out, (a, b)) in iter::zip(out1, iter::zip(a1, b1)) {
+    //                 *out = *a + *b;
+    //             }
+    //         }
+    //     }
+    //
+    //     Arch::new().dispatch(Impl {
+    //         out: &mut result,
+    //         a: &self.data,
+    //         b: &other.data,
+    //     });
+    //
+    //     Tensor::from_vec(result, &self.shape)
+    // }
+
+    // pub fn sum(&self) -> f32 {
+    //     self.data.iter().sum()
+    // }
+    //
     pub fn sum(&self) -> f32 {
         struct Impl<'a> {
             input: &'a [f32],
@@ -216,48 +319,48 @@ impl Tensor {
         }
     }
 
-    pub fn par_add(&self, other: &Tensor) -> Tensor {
-        assert_eq!(self.data.len(), other.data.len());
-        let len = self.data.len();
-        let mut result = vec![0.0f32; len];
-
-        result
-            .par_chunks_mut(1024)
-            .zip(self.data.par_chunks(1024))
-            .zip(other.data.par_chunks(1024))
-            .for_each(|((out, a), b)| {
-                struct Impl<'a> {
-                    out: &'a mut [f32],
-                    a: &'a [f32],
-                    b: &'a [f32],
-                }
-
-                impl WithSimd for Impl<'_> {
-                    type Output = ();
-
-                    #[inline(always)]
-                    fn with_simd<S: pulp::Simd>(self, simd: S) -> Self::Output {
-                        let Self { out, a, b } = self;
-
-                        let (out0, out1) = S::as_mut_simd_f32s(out);
-                        let (a0, a1) = S::as_simd_f32s(a);
-                        let (b0, b1) = S::as_simd_f32s(b);
-
-                        for (out, (a, b)) in iter::zip(out0, iter::zip(a0, b0)) {
-                            *out = simd.add_f32s(*a, *b);
-                        }
-
-                        for (out, (a, b)) in iter::zip(out1, iter::zip(a1, b1)) {
-                            *out = *a + *b;
-                        }
-                    }
-                }
-
-                Arch::new().dispatch(Impl { out, a, b });
-            });
-
-        Tensor::from_vec(result, &self.shape)
-    }
+    // pub fn par_add(&self, other: &Tensor) -> Tensor {
+    //     assert_eq!(self.data.len(), other.data.len());
+    //     let len = self.data.len();
+    //     let mut result = vec![0.0f32; len];
+    //
+    //     result
+    //         .par_chunks_mut(1024)
+    //         .zip(self.data.par_chunks(1024))
+    //         .zip(other.data.par_chunks(1024))
+    //         .for_each(|((out, a), b)| {
+    //             struct Impl<'a> {
+    //                 out: &'a mut [f32],
+    //                 a: &'a [f32],
+    //                 b: &'a [f32],
+    //             }
+    //
+    //             impl WithSimd for Impl<'_> {
+    //                 type Output = ();
+    //
+    //                 #[inline(always)]
+    //                 fn with_simd<S: pulp::Simd>(self, simd: S) -> Self::Output {
+    //                     let Self { out, a, b } = self;
+    //
+    //                     let (out0, out1) = S::as_mut_simd_f32s(out);
+    //                     let (a0, a1) = S::as_simd_f32s(a);
+    //                     let (b0, b1) = S::as_simd_f32s(b);
+    //
+    //                     for (out, (a, b)) in iter::zip(out0, iter::zip(a0, b0)) {
+    //                         *out = simd.add_f32s(*a, *b);
+    //                     }
+    //
+    //                     for (out, (a, b)) in iter::zip(out1, iter::zip(a1, b1)) {
+    //                         *out = *a + *b;
+    //                     }
+    //                 }
+    //             }
+    //
+    //             Arch::new().dispatch(Impl { out, a, b });
+    //         });
+    //
+    //     Tensor::from_vec(result, &self.shape)
+    // }
 
     /// Parallel sum using SIMD + Rayon
     pub fn par_sum(&self) -> f32 {
