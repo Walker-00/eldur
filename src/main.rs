@@ -10,20 +10,25 @@
  *      Add the offset options for better Compatibility with others frameworks
 */
 
-use std::{cell::RefCell, iter, rc::Rc};
+use std::{
+    cell::RefCell,
+    fmt::{self, Debug},
+    iter,
+    rc::Rc,
+};
 
 use aligned_vec::{AVec, ConstAlign, avec};
 use pulp::{Arch, WithSimd};
 use rayon::prelude::*;
 // use simdeez::prelude::*;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Tensor {
     pub data: Rc<RefCell<AVec<f32, ConstAlign<32>>>>,
     // pub data: AVec<f32, RuntimeAlign>,
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
-    // pub offset: usize,
+    pub offset: usize,
 }
 
 impl Tensor {
@@ -36,6 +41,7 @@ impl Tensor {
             data: Rc::new(RefCell::new(avec![[32]| 0.0; size])),
             shape: shape.to_vec(),
             strides,
+            offset: 0,
         }
     }
 
@@ -48,6 +54,7 @@ impl Tensor {
             data,
             shape: shape.to_vec(),
             strides,
+            offset: 0,
         }
     }
 
@@ -189,11 +196,40 @@ impl Tensor {
             data: self.data.clone(),
             shape: new_shape,
             strides: new_strides,
+            offset: self.offset,
         }
     }
 
     pub fn narrow(&self, axis: usize, start: usize, end: usize) -> Tensor {
         assert!(axis < self.shape.len(), "Narrow axis index out of bounds.");
+        assert!(
+            start < end || end < self.shape[axis],
+            "Invalid narrow range."
+        );
+
+        let new_offset = self.offset + start * self.strides[axis];
+
+        let mut new_shape = self.shape.clone();
+        new_shape[axis] = end - start;
+
+        Tensor {
+            data: self.data.clone(),
+            shape: new_shape,
+            strides: self.strides.clone(),
+            offset: new_offset,
+        }
+    }
+}
+
+// Implement Debug for easy printing of the Tensor's metadata
+impl Debug for Tensor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Tensor")
+            .field("shape", &self.shape)
+            .field("strides", &self.strides)
+            .field("offset", &self.offset)
+            .field("data_len", &self.data.borrow().len())
+            .finish()
     }
 }
 
