@@ -1,14 +1,29 @@
+/*
+ * Later Todo List To Improve
+ *
+ *  For The Performance: CGT_6917e073-f874-8003-89e6-a12a3f041e17
+ *      Make The very performance Aligned Vector Storage Backend for Tensor with Arc + Copy-On-Write(COW)
+ *      Add the Cached values to the tensor like computing the dims and len
+ *      Make The Optionales Methods with par_<methods_name> for Utilizing the Parallel Computing
+ *
+ *  For The Compatibility: GMN_4e8f478ba9002916
+ *      Add the offset options for better Compatibility with others frameworks
+*/
+
 use std::iter;
 
+use aligned_vec::{AVec, ConstAlign};
 use pulp::{Arch, WithSimd};
 use rayon::prelude::*;
-use simdeez::prelude::*;
+// use simdeez::prelude::*;
 
 #[derive(Debug, Clone)]
 pub struct Tensor {
-    pub data: Vec<f32>,
+    pub data: AVec<f32, ConstAlign<32>>,
+    // pub data: AVec<f32, RuntimeAlign>,
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
+    // pub offset: usize,
 }
 
 impl Tensor {
@@ -16,7 +31,9 @@ impl Tensor {
         let size = shape.par_iter().product();
         let strides = Self::compute_strides(shape);
         Self {
-            data: vec![0.0; size],
+            // data: vec![0.0; size],
+            // data: aligned_vec::avec_rt![[32]| 0.0; size],
+            data: aligned_vec::avec![[32]| 0.0; size],
             shape: shape.to_vec(),
             strides,
         }
@@ -25,6 +42,7 @@ impl Tensor {
     pub fn from_vec(data: Vec<f32>, shape: &[usize]) -> Self {
         assert_eq!(data.len(), shape.par_iter().product());
         let strides = Self::compute_strides(shape);
+        let data = AVec::from_iter(32, data);
 
         Self {
             data,
@@ -132,9 +150,35 @@ impl Tensor {
                 sum2 = simd.add_f32s(sum2, sum3);
 
                 sum0 = simd.add_f32s(sum0, sum2);
-                todo!()
+
+                for input in input01 {
+                    sum0 = simd.add_f32s(sum0, *input);
+                }
+
+                let mut sum = simd.reduce_sum_f32s(sum0);
+
+                for input in input1 {
+                    sum = sum + input;
+                }
+
+                sum
             }
         }
+        Arch::new().dispatch(Impl { input: &self.data })
+    }
+
+    pub fn mean(&self) -> f32 {
+        self.sum() / self.data.len() as f32
+    }
+
+    pub fn swapaxes(&self, axis1: usize, axis2: usize) -> Tensor {
+        assert!(
+            axis1 < self.shape.len() || axis2 < self.shape.len(),
+            "Axis index out of bounds."
+        );
+
+        // let mut new_shape = self.shape
+
         todo!()
     }
 }
