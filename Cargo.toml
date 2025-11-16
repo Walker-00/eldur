@@ -37,6 +37,7 @@ pulp = { version = "0.21.5", features = ["macro"] }
 rand = "0.9.0"
 rayon = "1.11.0"
 simdeez = "2.0.0"
+# tch = "0.22.0"
 thiserror = "2.0.16"
 
 [[bench]]

@@ -1,5 +1,5 @@
 use eldur::Tensor;
-use faer::Mat;
+use faer::{Mat, traits::AddByRef};
 use ndarray::{Array2, Axis};
 use rayon::prelude::*; // Required for ndarray parallel sum
 
@@ -13,7 +13,7 @@ use rayon::prelude::*; // Required for ndarray parallel sum
 // - 256x256 (65,536 elements) - Medium
 // - 1024x1024 (1,048,576 elements) - Large
 // ---
-const SIDES: [usize; 4] = [2, 64, 256, 1024];
+const SIDES: [usize; 6] = [2, 64, 256, 1024, 2048, 4096];
 
 // ---
 // 2. HELPER FUNCTION
@@ -46,7 +46,7 @@ fn bench_ndarray_add(bencher: divan::Bencher, n: usize) {
     let a = Array2::<f32>::from_elem(ndarray_shape, 1.0);
     let b = Array2::<f32>::from_elem(ndarray_shape, 1.0);
     bencher.bench_local(|| {
-        std::hint::black_box(&a + &b);
+        std::hint::black_box(&a.add_by_ref(&b));
     });
 }
 
@@ -56,7 +56,7 @@ fn bench_faer_add(bencher: divan::Bencher, n: usize) {
     let a = Mat::<f32>::from_fn(rows, cols, |_, _| 1.0);
     let b = Mat::<f32>::from_fn(rows, cols, |_, _| 1.0);
     bencher.bench_local(|| {
-        std::hint::black_box(&a + &b);
+        std::hint::black_box(&a.add_by_ref(&b));
     });
 }
 
@@ -117,4 +117,3 @@ fn main() {
     // IMPORTANT: Run this with `cargo run --release`
     divan::main();
 }
-
