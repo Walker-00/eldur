@@ -1,6 +1,6 @@
 use eldur::Tensor;
 use faer::{Mat, traits::AddByRef};
-use ndarray::{Array2, Axis};
+use ndarray::Array2;
 use rayon::prelude::*; // Required for ndarray parallel sum
 
 // ---
@@ -14,6 +14,7 @@ use rayon::prelude::*; // Required for ndarray parallel sum
 // - 1024x1024 (1,048,576 elements) - Large
 // ---
 const SIDES: [usize; 6] = [2, 64, 256, 1024, 2048, 4096];
+// const SIDES: [usize; 3] = [2, 64, 256];
 
 // ---
 // 2. HELPER FUNCTION
@@ -30,7 +31,7 @@ fn setup(n: usize) -> ([usize; 2], (usize, usize), usize) {
 // ADDITION BENCHMARKS
 // ---
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
 fn bench_tensor_add(bencher: divan::Bencher, n: usize) {
     let (shape, _, total_elements) = setup(n);
     let a = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
@@ -40,23 +41,23 @@ fn bench_tensor_add(bencher: divan::Bencher, n: usize) {
     });
 }
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
 fn bench_ndarray_add(bencher: divan::Bencher, n: usize) {
     let (_, ndarray_shape, _) = setup(n);
     let a = Array2::<f32>::from_elem(ndarray_shape, 1.0);
     let b = Array2::<f32>::from_elem(ndarray_shape, 1.0);
     bencher.bench_local(|| {
-        std::hint::black_box(&a.add_by_ref(&b));
+        std::hint::black_box(a.add_by_ref(&b));
     });
 }
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
 fn bench_faer_add(bencher: divan::Bencher, n: usize) {
     let (rows, cols) = (n, n);
     let a = Mat::<f32>::from_fn(rows, cols, |_, _| 1.0);
     let b = Mat::<f32>::from_fn(rows, cols, |_, _| 1.0);
     bencher.bench_local(|| {
-        std::hint::black_box(&a.add_by_ref(&b));
+        std::hint::black_box(a.add_by_ref(&b));
     });
 }
 
@@ -64,7 +65,7 @@ fn bench_faer_add(bencher: divan::Bencher, n: usize) {
 // SINGLE-THREADED SUMMATION
 // ---
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
 fn bench_tensor_sum(bencher: divan::Bencher, n: usize) {
     let (shape, _, total_elements) = setup(n);
     let a = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
@@ -73,7 +74,7 @@ fn bench_tensor_sum(bencher: divan::Bencher, n: usize) {
     });
 }
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
 fn bench_ndarray_sum(bencher: divan::Bencher, n: usize) {
     let (_, ndarray_shape, _) = setup(n);
     let a = Array2::<f32>::from_elem(ndarray_shape, 1.0);
@@ -86,7 +87,7 @@ fn bench_ndarray_sum(bencher: divan::Bencher, n: usize) {
 // MULTI-THREADED (PARALLEL) SUMMATION
 // ---
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
 fn bench_tensor_sum_parallel(bencher: divan::Bencher, n: usize) {
     let (shape, _, total_elements) = setup(n);
     let a = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
@@ -95,7 +96,7 @@ fn bench_tensor_sum_parallel(bencher: divan::Bencher, n: usize) {
     });
 }
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
 fn bench_ndarray_sum_parallel(bencher: divan::Bencher, n: usize) {
     let (_, ndarray_shape, _) = setup(n);
     let a = Array2::<f32>::from_elem(ndarray_shape, 1.0);
@@ -104,7 +105,7 @@ fn bench_ndarray_sum_parallel(bencher: divan::Bencher, n: usize) {
     });
 }
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
 fn bench_faer_sum_parallel(bencher: divan::Bencher, n: usize) {
     let (rows, cols) = (n, n);
     let a = Mat::<f32>::from_fn(rows, cols, |_, _| 1.0);
@@ -114,6 +115,5 @@ fn bench_faer_sum_parallel(bencher: divan::Bencher, n: usize) {
 }
 
 fn main() {
-    // IMPORTANT: Run this with `cargo run --release`
     divan::main();
 }
