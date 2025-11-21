@@ -140,6 +140,19 @@ impl Tensor {
         }
     }
 
+    pub fn reshape(&self, new_shape: &[usize]) -> Tensor {
+        assert_eq!(self.len, new_shape.iter().product());
+
+        Tensor {
+            data: self.data.clone(),
+            shape: new_shape.to_vec(),
+            strides: Self::compute_strides(new_shape),
+            offset: self.offset,
+            len: self.len,
+            ndim: new_shape.len(),
+        }
+    }
+
     pub fn compute_strides(shape: &[usize]) -> Vec<usize> {
         let mut strides = vec![1; shape.len()];
 
