@@ -31,17 +31,17 @@ fn setup(n: usize) -> ([usize; 2], (usize, usize), usize) {
 // ADDITION BENCHMARKS
 // ---
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
 fn bench_tensor_add(bencher: divan::Bencher, n: usize) {
     let (shape, _, total_elements) = setup(n);
     let a = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
     let b = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
     bencher.bench_local(|| {
-        std::hint::black_box(a.add(&b));
+        std::hint::black_box(a.add_by_ref(&b));
     });
 }
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
 fn bench_ndarray_add(bencher: divan::Bencher, n: usize) {
     let (_, ndarray_shape, _) = setup(n);
     let a = Array2::<f32>::from_elem(ndarray_shape, 1.0);
@@ -51,7 +51,7 @@ fn bench_ndarray_add(bencher: divan::Bencher, n: usize) {
     });
 }
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
 fn bench_faer_add(bencher: divan::Bencher, n: usize) {
     let (rows, cols) = (n, n);
     let a = Mat::<f32>::from_fn(rows, cols, |_, _| 1.0);
@@ -65,7 +65,7 @@ fn bench_faer_add(bencher: divan::Bencher, n: usize) {
 // SINGLE-THREADED SUMMATION
 // ---
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
 fn bench_tensor_sum(bencher: divan::Bencher, n: usize) {
     let (shape, _, total_elements) = setup(n);
     let a = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
@@ -74,7 +74,7 @@ fn bench_tensor_sum(bencher: divan::Bencher, n: usize) {
     });
 }
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
 fn bench_ndarray_sum(bencher: divan::Bencher, n: usize) {
     let (_, ndarray_shape, _) = setup(n);
     let a = Array2::<f32>::from_elem(ndarray_shape, 1.0);
@@ -87,7 +87,7 @@ fn bench_ndarray_sum(bencher: divan::Bencher, n: usize) {
 // MULTI-THREADED (PARALLEL) SUMMATION
 // ---
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
 fn bench_tensor_sum_parallel(bencher: divan::Bencher, n: usize) {
     let (shape, _, total_elements) = setup(n);
     let a = Tensor::from_vec(vec![1.0f32; total_elements], &shape);
@@ -96,7 +96,7 @@ fn bench_tensor_sum_parallel(bencher: divan::Bencher, n: usize) {
     });
 }
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
 fn bench_ndarray_sum_parallel(bencher: divan::Bencher, n: usize) {
     let (_, ndarray_shape, _) = setup(n);
     let a = Array2::<f32>::from_elem(ndarray_shape, 1.0);
@@ -105,7 +105,7 @@ fn bench_ndarray_sum_parallel(bencher: divan::Bencher, n: usize) {
     });
 }
 
-#[divan::bench(args = SIDES, sample_size = 100, sample_count = 100)]
+#[divan::bench(args = SIDES, sample_size = 100, sample_count = 10)]
 fn bench_faer_sum_parallel(bencher: divan::Bencher, n: usize) {
     let (rows, cols) = (n, n);
     let a = Mat::<f32>::from_fn(rows, cols, |_, _| 1.0);
@@ -117,3 +117,4 @@ fn bench_faer_sum_parallel(bencher: divan::Bencher, n: usize) {
 fn main() {
     divan::main();
 }
+

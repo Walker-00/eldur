@@ -29,14 +29,16 @@ pub struct Tensor {
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
     pub offset: usize,
+    pub len: usize,
+    pub ndim: usize,
 }
 
 impl AddByRef for Tensor {
     type Output = Tensor;
 
     fn add_by_ref(&self, rhs: &Self) -> Self::Output {
-        assert_eq!(self.data.len(), rhs.data.len());
-        let len = self.data.len();
+        assert_eq!(self.len, rhs.len);
+        let len = self.len;
 
         // Allocate aligned AVec result directly
         let mut result: AVec<f32, ConstAlign<32>> = avec![[32]| 0.0; len];
@@ -93,26 +95,34 @@ impl AddByRef for Tensor {
             shape: self.shape.clone(),
             strides: self.strides.clone(),
             offset: self.offset,
+            len: len,
+            ndim: self.ndim,
         }
     }
 }
 
 impl Tensor {
     pub fn zeros(shape: &[usize]) -> Self {
-        let size = shape.par_iter().product::<usize>();
+        let size = shape.iter().product::<usize>();
         let strides = Self::compute_strides(shape);
+        let data = avec![[32]| 0.0; size];
+        let data_len = data.len();
+
         Self {
             // data: vec![0.0; size],
             // data: aligned_vec::avec_rt![[32]| 0.0; size],
-            data: avec![[32]| 0.0; size],
+            data,
             shape: shape.to_vec(),
             strides,
             offset: 0,
+            len: data_len,
+            ndim: shape.len(),
         }
     }
 
     pub fn from_vec(data: Vec<f32>, shape: &[usize]) -> Self {
-        assert_eq!(data.len(), shape.par_iter().product::<usize>());
+        let data_len = data.len();
+        assert_eq!(data_len, shape.iter().product::<usize>());
         let strides = Self::compute_strides(shape);
         let data = AVec::from_iter(32, data);
 
@@ -121,6 +131,8 @@ impl Tensor {
             shape: shape.to_vec(),
             strides,
             offset: 0,
+            len: data_len,
+            ndim: shape.len(),
         }
     }
 
@@ -135,12 +147,14 @@ impl Tensor {
     }
 
     pub fn index(&self, idx: &[usize]) -> usize {
-        assert_eq!(idx.len(), self.shape.len());
+        assert_eq!(idx.len(), self.ndim);
         // idx.par_iter().zip(self.strides.iter()).
-        idx.iter()
-            .zip(self.strides.iter())
-            .map(|(i, s)| i * s)
-            .sum()
+        self.offset
+            + idx
+                .iter()
+                .zip(self.strides.iter())
+                .map(|(i, s)| i * s)
+                .sum::<usize>()
     }
 
     pub fn get(&self, idx: &[usize]) -> f32 {
@@ -153,8 +167,8 @@ impl Tensor {
     }
 
     pub fn add(&self, other: &Tensor) -> Tensor {
-        assert_eq!(self.data.len(), other.data.len());
-        let len = self.data.len();
+        assert_eq!(self.len, other.len);
+        let len = self.len;
 
         // Allocate aligned AVec result directly
         let mut result: AVec<f32, ConstAlign<32>> = avec![[32]| 0.0; len];
@@ -162,9 +176,9 @@ impl Tensor {
         // let mut result = vec![0.0; len];
 
         // Get raw slices
-        let a = &self.data;
-        let b = &other.data;
-        let out = &mut result;
+        // let a = &self.data;
+        // let b = &other.data;
+        // let out = &mut result;
 
         // Use the same WithSimd dispatch but iterate over slices, and use unsafe to avoid bounds checks
         struct Impl<'a> {
@@ -195,11 +209,14 @@ impl Tensor {
             }
         }
 
-        // SAFETY: we know the slices are sized correctly, as we created result with same len
-        let out_slice: &mut [f32] = unsafe { slice::from_raw_parts_mut(out.as_mut_ptr(), len) };
-        let a_slice: &[f32] = unsafe { slice::from_raw_parts(a.as_ptr(), len) };
-        let b_slice: &[f32] = unsafe { slice::from_raw_parts(b.as_ptr(), len) };
+        let out_ptr = result.as_mut_ptr();
 
+        let a_ptr = unsafe { self.data.as_ptr().add(self.offset) };
+        let b_ptr = unsafe { other.data.as_ptr().add(other.offset) };
+
+        let a_slice = unsafe { slice::from_raw_parts(a_ptr, len) };
+        let b_slice = unsafe { slice::from_raw_parts(b_ptr, len) };
+        let out_slice = unsafe { slice::from_raw_parts_mut(out_ptr, len) };
         Arch::new().dispatch(Impl {
             out: out_slice,
             a: a_slice,
@@ -211,6 +228,8 @@ impl Tensor {
             shape: self.shape.clone(),
             strides: self.strides.clone(),
             offset: self.offset,
+            len: len,
+            ndim: self.ndim,
         }
     }
 
@@ -270,11 +289,6 @@ impl Tensor {
                 // let mut sum = simd.reduce_sum_f32s(sum0);
                 let mut total = simd.reduce_sum_f32s(sums[0]);
 
-                // for input in input1 {
-                //     sum = sum + input;
-                // }
-                //
-                // sum
                 for &val in input1 {
                     total += val;
                 }
@@ -286,12 +300,12 @@ impl Tensor {
     }
 
     pub fn mean(&self) -> f32 {
-        self.sum() / self.data.len() as f32
+        self.sum() / self.len as f32
     }
 
     pub fn swapaxes(&self, axis1: usize, axis2: usize) -> Tensor {
         assert!(
-            axis1 < self.shape.len() || axis2 < self.shape.len(),
+            axis1 < self.ndim || axis2 < self.ndim,
             "Axis index out of bounds."
         );
 
@@ -306,11 +320,13 @@ impl Tensor {
             shape: new_shape,
             strides: new_strides,
             offset: self.offset,
+            len: self.len,
+            ndim: self.ndim,
         }
     }
 
     pub fn narrow(&self, axis: usize, start: usize, end: usize) -> Tensor {
-        assert!(axis < self.shape.len(), "Narrow axis index out of bounds.");
+        assert!(axis < self.ndim, "Narrow axis index out of bounds.");
         assert!(
             start < end || end < self.shape[axis],
             "Invalid narrow range."
@@ -326,6 +342,8 @@ impl Tensor {
             shape: new_shape,
             strides: self.strides.clone(),
             offset: new_offset,
+            len: self.len,
+            ndim: self.ndim,
         }
     }
 
@@ -390,7 +408,7 @@ impl Debug for Tensor {
             .field("shape", &self.shape)
             .field("strides", &self.strides)
             .field("offset", &self.offset)
-            .field("data_len", &self.data.len())
+            .field("data_len", &self.len)
             .finish()
     }
 }
