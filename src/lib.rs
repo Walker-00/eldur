@@ -46,9 +46,9 @@ impl AddByRef for Tensor {
         // let mut result = vec![0.0; len];
 
         // Get raw slices
-        let a = &self.data;
-        let b = &rhs.data;
-        let out = &mut result;
+        // let a = &self.data;
+        // let b = &rhs.data;
+        // let out = &mut result;
 
         // Use the same WithSimd dispatch but iterate over slices, and use unsafe to avoid bounds checks
         struct Impl<'a> {
@@ -79,10 +79,14 @@ impl AddByRef for Tensor {
             }
         }
 
-        // SAFETY: we know the slices are sized correctly, as we created result with same len
-        let out_slice: &mut [f32] = unsafe { slice::from_raw_parts_mut(out.as_mut_ptr(), len) };
-        let a_slice: &[f32] = unsafe { slice::from_raw_parts(a.as_ptr(), len) };
-        let b_slice: &[f32] = unsafe { slice::from_raw_parts(b.as_ptr(), len) };
+        let out_ptr = result.as_mut_ptr();
+
+        let a_ptr = unsafe { self.data.as_ptr().add(self.offset) };
+        let b_ptr = unsafe { rhs.data.as_ptr().add(rhs.offset) };
+
+        let a_slice = unsafe { slice::from_raw_parts(a_ptr, len) };
+        let b_slice = unsafe { slice::from_raw_parts(b_ptr, len) };
+        let out_slice = unsafe { slice::from_raw_parts_mut(out_ptr, len) };
 
         Arch::new().dispatch(Impl {
             out: out_slice,
@@ -217,6 +221,7 @@ impl Tensor {
         let a_slice = unsafe { slice::from_raw_parts(a_ptr, len) };
         let b_slice = unsafe { slice::from_raw_parts(b_ptr, len) };
         let out_slice = unsafe { slice::from_raw_parts_mut(out_ptr, len) };
+
         Arch::new().dispatch(Impl {
             out: out_slice,
             a: a_slice,
