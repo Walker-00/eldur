@@ -15,6 +15,8 @@ use std::{
     iter, slice,
 };
 
+mod traits;
+
 use aligned_vec::{AVec, ConstAlign, RuntimeAlign, avec, avec_rt};
 use faer::traits::AddByRef;
 use pulp::{Arch, WithSimd};
