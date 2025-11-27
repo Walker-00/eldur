@@ -1,4 +1,4 @@
-use eldur::Tensor;
+use eldur::prelude::*;
 use rand::Rng;
 
 fn main() {
